@@ -1,0 +1,20 @@
+# BiliMusicTool dependencies
+#
+# NOTE: keep this file ASCII-only!
+# pip reads requirements files using the system locale encoding. On a
+# Chinese Windows box that is GBK/cp936, so UTF-8 Chinese comments here
+# make pip abort with UnicodeDecodeError before installing anything.
+#
+# Why these three:
+#   * numpy    - BPM detection (self-implemented beat tracking in bpm_detector.py)
+#   * requests - Bilibili web APIs
+#   * yt-dlp   - audio download / search fallback / browser cookie reading
+#
+# Deliberately NOT used:
+#   * librosa - would force-upgrade numpy to 2.x and pull numba, breaking env
+#   * scipy   - ~85 MB installed for a handful of DSP calls; those calls
+#               (stft / find_peaks / resample_poly / correlate) have been
+#               reimplemented with numpy in bpm_detector.py
+numpy>=1.24,<2.0
+requests>=2.28
+yt-dlp>=2024.1.1

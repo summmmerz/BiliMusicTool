@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>BiliMusicTool · B站歌曲下载与 BPM 空隙处理</title>
+<link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="bg-glow"></div>
+
+<header class="topbar">
+  <div class="brand">
+    <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true">
+      <rect x="2" y="2" width="28" height="28" rx="7" fill="none" stroke="currentColor" stroke-width="2"/>
+      <path d="M11 10.5v11l9.5-5.5z" fill="currentColor"/>
+    </svg>
+    <div class="brand-text">
+      <strong>BiliMusicTool</strong>
+      <span>搜歌 · 下载 · 曲绘分离 · BPM · 一小节空隙 · 44.1kHz/320k MP3</span>
+    </div>
+  </div>
+  <div class="env" id="env">
+    <span class="pill" id="env-ffmpeg">检测环境中…</span>
+    <span class="pill" id="env-ytdlp"></span>
+  </div>
+</header>
+
+<nav class="tabs" role="tablist">
+  <button class="tab active" data-tab="search" role="tab">
+    <span class="tab-dot"></span>从 B 站搜索下载
+  </button>
+  <button class="tab" data-tab="local" role="tab">
+    <span class="tab-dot"></span>导入本地音乐
+  </button>
+</nav>
+
+<main>
+  <!-- ============ 面板一：B 站搜索 ============ -->
+  <section class="panel active" id="panel-search">
+    <form class="searchbar" id="search-form" autocomplete="off">
+      <input id="keyword" type="text" placeholder="输入歌曲名，例如：千本樱 / 打上花火" required>
+      <button class="btn primary" type="submit" id="search-btn">
+        <span class="btn-label">搜索</span>
+      </button>
+    </form>
+
+    <details class="options">
+      <summary>搜索选项</summary>
+      <div class="opt-grid">
+        <label class="opt">
+          <span>结果条数</span>
+          <select id="count">
+            <option>5</option><option selected>8</option><option>12</option><option>20</option>
+          </select>
+        </label>
+        <label class="opt checkbox">
+          <input type="checkbox" id="smart" checked>
+          <span>智能排序（原曲 / MV 优先，翻唱伴奏降权）</span>
+        </label>
+        <div class="opt">
+          <span>浏览器 Cookie（可选，用于会员或受限视频）</span>
+          <div class="row">
+            <select id="cookies">
+              <option value="">不使用</option>
+              <option value="edge">Edge</option>
+              <option value="chrome">Chrome</option>
+              <option value="firefox">Firefox</option>
+            </select>
+            <button class="btn tiny ghost" type="button" id="cookies-check">检查</button>
+          </div>
+          <span class="cookie-note" id="cookies-note" hidden></span>
+        </div>
+      </div>
+      <p class="hint">
+        Cookie 只影响「能否下载会员/受限视频」，<b>不会改变搜索结果</b>（B 站搜索本身不个性化）。
+        在 Windows 上读浏览器 Cookie 经常失败（数据库被锁或新版加密），点「检查」可先确认。
+      </p>
+    </details>
+
+    <div class="status-line" id="search-status" hidden></div>
+    <div class="results" id="results"></div>
+  </section>
+
+  <!-- ============ 面板二：本地导入 ============ -->
+  <section class="panel" id="panel-local">
+    <div class="dropzone" id="dropzone" tabindex="0">
+      <input type="file" id="file-input" accept="audio/*,.mp3,.m4a,.wav,.flac,.aac,.ogg,.opus,.wma" hidden>
+      <svg viewBox="0 0 24 24" aria-hidden="true" class="dz-icon">
+        <path d="M12 16V4m0 0L8 8m4-4 4 4" fill="none" stroke="currentColor" stroke-width="1.8"
+              stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3" fill="none" stroke="currentColor"
+              stroke-width="1.8" stroke-linecap="round"/>
+      </svg>
+      <p class="dz-title">把音乐文件拖到这里，或点击选择</p>
+      <p class="dz-hint">支持 mp3 / m4a / wav / flac / aac / ogg / opus 等，单文件最大 500 MB</p>
+      <div class="dz-file" id="dz-file" hidden></div>
+    </div>
+  </section>
+
+  <!-- ============ 共用处理设置 ============ -->
+  <section class="settings" id="settings">
+    <div class="settings-head">
+      <h2>处理设置</h2>
+      <p class="muted" id="settings-target">先搜索并选择一首歌</p>
+    </div>
+    <div class="opt-grid">
+      <label class="opt">
+        <span>BPM 来源</span>
+        <select id="bpm-mode">
+          <option value="auto" selected>自动检测（本地音频分析）</option>
+          <option value="manual">手动指定 BPM</option>
+        </select>
+      </label>
+      <label class="opt" id="bpm-manual-wrap" hidden>
+        <span>BPM 数值</span>
+        <input id="bpm-manual" type="number" min="30" max="300" step="1" placeholder="例如 174">
+      </label>
+      <label class="opt">
+        <span>每小节拍数</span>
+        <select id="beats-per-bar">
+          <option value="4" selected>4（4/4 拍，最常见）</option>
+          <option value="3">3（3/4 拍，圆舞曲）</option>
+          <option value="6">6（6/8 拍）</option>
+          <option value="2">2（2/4 拍）</option>
+        </select>
+      </label>
+      <label class="opt checkbox">
+        <input type="checkbox" id="keep-source">
+        <span>保留下载的原始音频文件</span>
+      </label>
+    </div>
+    <p class="hint" id="bpm-hint">BPM 全部由本地音频分析得出，并四舍五入取整（不做任何在线查询）。</p>
+    <div class="actions">
+      <button class="btn primary" id="start-btn" disabled>开始处理</button>
+      <button class="btn danger" id="cancel-btn" hidden>取消任务</button>
+    </div>
+  </section>
+
+  <!-- ============ 任务进度与产物 ============ -->
+  <section class="job" id="job" hidden>
+    <div class="job-head">
+      <h2 id="job-title">处理中</h2>
+      <span class="badge" id="job-badge">排队中</span>
+    </div>
+    <div class="progress"><div class="progress-bar" id="progress-bar"></div></div>
+    <p class="stage" id="job-stage">—</p>
+    <div class="summary" id="job-summary"></div>
+    <div class="artifacts" id="job-artifacts"></div>
+    <details class="logbox">
+      <summary>处理日志</summary>
+      <pre id="job-log"></pre>
+    </details>
+  </section>
+</main>
+
+<footer>
+  <span>本地工具，不收集任何数据 · 产物保存在项目 output 目录</span>
+</footer>
+
+<div class="toast-wrap" id="toasts"></div>
+<script src="/static/app.js"></script>
+</body>
+</html>
