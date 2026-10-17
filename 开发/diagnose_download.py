@@ -75,23 +75,38 @@ def main() -> int:
     # 关键：必须测「程序实际会用的那一个 yt-dlp」。
     # 之前这里固定用 python -m yt_dlp，而程序在有 yt-dlp.exe 时优先用它，
     # 于是出现"诊断成功、实际失败"的假阴性。现在两边用完全相同的选择逻辑。
-    from bilimusic.bili import _ytdlp_base, ytdlp_version_info
+    from bilimusic.bili import _ytdlp_invocation, ytdlp_version_info
+    base_cmd, src = _ytdlp_invocation()
     print(f"  {OK} 程序实际会用: {ytdlp_version_info()}")
-    base_cmd = _ytdlp_base(None)
-    probe = base_cmd[:1] + ["--version"]
+    probe = base_cmd + ["--version"]
     r = subprocess.run(probe, capture_output=True, text=True,
                        encoding="utf-8", errors="replace", timeout=30)
-    print(f"       {base_cmd[0]} --version -> "
-          f"rc={r.returncode} out={(r.stdout or '').strip()[:60]!r} "
-          f"err={(r.stderr or '').strip()[:120]!r}")
-    if not (r.stdout or "").strip():
-        print(f"  {WARN} 这个 yt-dlp 连版本号都吐不出来，很可能是它本身有问题")
-        print(f"       对照测试 python -m yt_dlp：")
-        r2 = subprocess.run([sys.executable, "-m", "yt_dlp", "--version"],
-                            capture_output=True, text=True, encoding="utf-8",
-                            errors="replace", timeout=30)
-        print(f"       rc={r2.returncode} out={(r2.stdout or '').strip()[:60]!r} "
-              f"err={(r2.stderr or '').strip()[:120]!r}")
+    print(f"       --version -> rc={r.returncode} "
+          f"out={(r.stdout or '').strip()[:60]!r} err={(r.stderr or '').strip()[:120]!r}")
+
+    # pip stub 体检：它们的 exe 内部硬编码了**构建机**的解释器绝对路径，
+    # 包搬到别处后启动即失败（退出码 1、stdout/stderr 全空）。这是排查
+    # "下载失败但没有任何错误信息"时最该先看的一条。
+    stubs = sorted((HERE / "runtime" / "Scripts").glob("*.exe")) \
+        if (HERE / "runtime" / "Scripts").is_dir() else []
+    if stubs:
+        print(f"  {WARN} 发现 {len(stubs)} 个 pip stub（{stubs[0].name} ...），"
+              f"检查它们是否指向本机：")
+        real_py = str(HERE / "runtime" / "python.exe")
+        bad = []
+        for s in stubs:
+            blob = s.read_bytes()
+            ok_here = real_py.lower().encode("utf-8") in blob.lower() \
+                or real_py.lower().encode("utf-16-le") in blob.lower()
+            if not ok_here:
+                bad.append(s.name)
+        if bad:
+            print(f"  {BAD} {len(bad)} 个 stub 指向**不存在的解释器路径**：{bad[:5]}")
+            print("       这就是「退出码 1 且无任何输出」的原因。")
+            print("       新版程序已改为只用 python -m yt_dlp，不受影响；")
+            print("       若你用的是旧包，请换用新包。")
+        else:
+            print(f"  {OK} stub 路径与本机一致")
 
     hdr("3. 目录可写性")
     from bilimusic.config import DEFAULT_OUTPUT_ROOT
@@ -123,6 +138,7 @@ def main() -> int:
     tmp = Path(tempfile.mkdtemp(prefix="bmt_diag_"))
     print(f"  临时目录: {tmp}")
     # 用程序自己的前缀，保证和界面下载走完全相同的可执行文件与参数
+    from bilimusic.bili import _ytdlp_base
     cmd = list(_ytdlp_base(None))
     print(f"  使用 yt-dlp: {cmd[0]}")
     cmd += ["-f", "ba/bestaudio", "-x", "--audio-format", "best",

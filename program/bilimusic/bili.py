@@ -77,26 +77,50 @@ class BiliError(RuntimeError):
 _YTDLP_VERSION_CACHE: str | None = None
 
 
-def ytdlp_version_info() -> str:
-    """返回「yt-dlp 来源 + 版本」的可读字符串，只探测一次。
+def _ytdlp_module_ok() -> bool:
+    """当前解释器里是否装了 yt_dlp 模块（可被 `-m yt_dlp` 使用）。
 
-    为什么要打这行日志：B 站接口会变，**旧版 yt-dlp 是"搜索正常但下载失败"
-    的经典原因**。零安装版的 yt-dlp.exe 放在 runtime\\Scripts\\ 下、不在 PATH 里，
-    日志里看不到版本就很难判断；这里主动探测并缓存，让每次运行都留下痕迹。
+    **为什么必须优先用模块而不是 Scripts\\yt-dlp.exe**：
+    pip 生成的 console-script stub（yt-dlp.exe / pip.exe / f2py.exe ...）会把
+    安装时的**解释器绝对路径**硬编码进自身（形如 `#!D:\\...\\runtime\\python.exe`）。
+    这个包被拷到别的机器/别的目录后，该路径就不存在了，stub 一启动即失败：
+    **退出码 1，stdout 与 stderr 都是空**（实测复现）。而 `python -m yt_dlp`
+    用的是**正在运行的那个解释器**，天然正确，不受搬迁影响。
     """
+    import importlib.util
+
+    try:
+        return importlib.util.find_spec("yt_dlp") is not None
+    except (ImportError, ValueError):
+        return False
+
+
+def _ytdlp_invocation() -> tuple[list[str], str]:
+    """返回 (命令前缀, 来源说明)。
+
+    优先 `python -m yt_dlp`；只有在当前解释器没有该模块时才退回独立的
+    yt-dlp.exe（那时它通常来自 winget / 手动安装，不是 pip stub）。
+    """
+    if _ytdlp_module_ok():
+        return [sys.executable, "-m", "yt_dlp"], f"{sys.executable} -m yt_dlp"
+    exe = which("yt-dlp")
+    if exe:
+        return [exe], exe
+    return [sys.executable, "-m", "yt_dlp"], f"{sys.executable} -m yt_dlp（未安装?）"
+
+
+def ytdlp_version_info() -> str:
+    """返回「yt-dlp 来源 + 版本」的可读字符串，只探测一次。"""
     global _YTDLP_VERSION_CACHE
     if _YTDLP_VERSION_CACHE is not None:
         return _YTDLP_VERSION_CACHE
-    exe = which("yt-dlp")
-    if exe:
-        source, probe = exe, [exe, "--version"]
-    else:
-        source, probe = f"{sys.executable} -m yt_dlp", [sys.executable, "-m", "yt_dlp", "--version"]
+    base, source = _ytdlp_invocation()
     try:
-        r = subprocess.run(probe, capture_output=True, text=True,
+        r = subprocess.run(base + ["--version"], capture_output=True, text=True,
                            encoding="utf-8", errors="replace", timeout=25)
-        ver = (r.stdout or r.stderr or "").strip().splitlines()[-1:] or ["?"]
-        ver = ver[0][:60] if ver else "?"
+        text = (r.stdout or "") + (r.stderr or "")
+        lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+        ver = lines[-1][:60] if lines else f"未知(rc={r.returncode})"
     except Exception as exc:  # noqa: BLE001
         ver = f"探测失败({type(exc).__name__})"
     _YTDLP_VERSION_CACHE = f"{ver}  [{source}]"
@@ -104,12 +128,13 @@ def ytdlp_version_info() -> str:
 
 
 def _ytdlp_base(cookies_from_browser: str | None = None) -> list[str]:
-    """构造 yt-dlp 调用前缀；优先使用当前 Python 的 -m yt_dlp，保证与安装环境一致。"""
-    exe = which("yt-dlp")
-    if exe:
-        cmd = [exe]
-    else:
-        cmd = [sys.executable, "-m", "yt_dlp"]
+    """构造 yt-dlp 调用前缀。
+
+    默认用 `python -m yt_dlp`，避开 pip stub 里硬编码的解释器路径
+    在别处失效的问题（详见 `_ytdlp_module_ok`）。
+    """
+    base, _source = _ytdlp_invocation()
+    cmd = list(base)
     cmd += [
         "--no-warnings",
         "--no-playlist",

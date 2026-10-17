@@ -20,6 +20,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+# 必须在 import bilimusic.* **之前**设好：config.py 在导入时就计算出
+# DEFAULT_OUTPUT_ROOT，之后改环境变量已经来不及了（这是个隐蔽的顺序陷阱）。
+if not os.environ.get("BILIMUSIC_OUTPUT"):
+    os.environ["BILIMUSIC_OUTPUT"] = str(Path.cwd() / "output")
+
 from bilimusic.web import serve  # noqa: E402
 
 
@@ -29,10 +34,6 @@ def main() -> int:
     parser.add_argument("--port", type=int, default=8765, help="监听端口（默认 8765）")
     parser.add_argument("--open", action="store_true", help="启动后自动打开浏览器")
     args = parser.parse_args()
-
-    # 把输出目录指向"启动时所在目录"（通常是包根），方便用户找产物
-    if not os.environ.get("BILIMUSIC_OUTPUT"):
-        os.environ["BILIMUSIC_OUTPUT"] = str(Path.cwd() / "output")
 
     try:
         serve(host=args.host, port=args.port, open_browser=args.open)

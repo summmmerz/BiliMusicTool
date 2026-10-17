@@ -11,7 +11,7 @@
 ### 方式 A：网页界面
 
 ```bat
-cd /d D:\BiliMusicTool
+cd /d D:\你的路径\BiliMusicTool\program
 python serve.py --open
 ```
 

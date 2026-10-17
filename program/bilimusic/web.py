@@ -47,8 +47,11 @@ from .config import (
 from .pipeline import ProcessedTrack, process_audio_file, process_download
 
 WEB_DIR = PROJECT_ROOT / "web"
-UPLOAD_DIR = PROJECT_ROOT / "output" / "_uploads"
-JOB_TMP_DIR = PROJECT_ROOT / "output" / "_tmp"
+# 临时/上传目录跟着"输出根目录"走，而不是写死 PROJECT_ROOT。
+# 写死的话，用户把产物指到包根 output\ 时，临时文件仍会落在 program\output\ 里，
+# 排查时极难理解（曾误判为环境变量没传递）。
+UPLOAD_DIR = DEFAULT_OUTPUT_ROOT / "_uploads"
+JOB_TMP_DIR = DEFAULT_OUTPUT_ROOT / "_tmp"
 
 # 上传文件大小上限（500 MB）
 MAX_UPLOAD_BYTES = 500 * 1024 * 1024

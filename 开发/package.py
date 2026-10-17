@@ -102,6 +102,35 @@ def _write_embedded_launcher(target: Path) -> None:
     print(f"  文件 启动程序.bat  （零安装版专用，{len(data)} 字节，纯 ASCII+CRLF）")
 
 
+def _check_no_build_paths(target: Path, standalone: bool) -> None:
+    """确保包内没有把"构建机上的绝对路径"带出去。
+
+    踩过的坑：pip 生成的 console-script stub 会把解释器绝对路径嵌进 exe，
+    包搬到别的目录后这些 stub 全部失效（退出码 1、无任何输出）。
+    这里对所有小文件做一次扫描，出现构建机路径就大声报警。
+    """
+    print("[校验] 检查包内是否残留构建机绝对路径 ...")
+    needles = {str(ROOT).lower(), str(PROGRAM_SRC).lower()}
+    hits: list[str] = []
+    for f in target.rglob("*"):
+        if not f.is_file() or f.stat().st_size > 2_000_000:
+            continue  # ffmpeg 这类大二进制跳过（不可能是我们的路径来源）
+        try:
+            blob = f.read_bytes().lower()
+        except OSError:
+            continue
+        for n in needles:
+            if n.encode("utf-8", "ignore") in blob or n.encode("utf-16-le", "ignore") in blob:
+                hits.append(str(f.relative_to(target)))
+                break
+    if hits:
+        print(f"  [警告] {len(hits)} 个文件含构建机路径（换机器可能失效）:")
+        for h in hits[:6]:
+            print(f"          {h}")
+    else:
+        print("  通过：未发现构建机路径")
+
+
 def build(out_root: Path, *, standalone: bool, make_zip: bool) -> Path:
     suffix = "-standalone" if standalone else ""
     name = f"BiliMusicTool-{__version__}{suffix}"
@@ -169,6 +198,23 @@ def build(out_root: Path, *, standalone: bool, make_zip: bool) -> Path:
         shutil.copytree(RUNTIME_SRC, prog_dst / "runtime", ignore=_ignore)
         print(f"  运行时 ({_size_mb(RUNTIME_SRC):.1f} MB)")
 
+        # 删掉 pip 生成的 console-script stub（yt-dlp.exe / pip.exe / f2py.exe ...）。
+        # 这些 stub 内部硬编码了**构建机上的解释器绝对路径**（形如
+        # `#!D:\...\runtime\python.exe`），包被搬到别的目录后一刀就坏：
+        # 启动即失败，退出码 1，stdout 与 stderr 全空（曾造成"下载失败但没有任何
+        # 错误信息"的线上故障）。程序已改为 `python -m xxx`，用不到这些 stub。
+        scripts = prog_dst / "runtime" / "Scripts"
+        removed = []
+        if scripts.is_dir():
+            for stub in sorted(scripts.glob("*.exe")):
+                stub.unlink()
+                removed.append(stub.name)
+            if not any(scripts.iterdir()):
+                scripts.rmdir()
+        if removed:
+            print(f"  已剔除 {len(removed)} 个 pip stub（含硬编码路径）: "
+                  f"{', '.join(removed[:4])}{' ...' if len(removed) > 4 else ''}")
+
     # ---- 根目录：入口 + 说明 ----
     print("[根目录]")
     guide_src = DEV_DIR / (GUIDE_STANDALONE if standalone else GUIDE_NORMAL)
@@ -214,6 +260,9 @@ def build(out_root: Path, *, standalone: bool, make_zip: bool) -> Path:
             print(f"  文件 {f}")
         else:
             print(f"  [跳过] 找不到 {f}")
+
+    # ---- 构建期校验：包内不得含"构建机专属绝对路径" ----
+    _check_no_build_paths(target, standalone)
 
     size = _size_mb(target)
     print(f"\n已生成: {target}\n大小:   {size:.1f} MB")

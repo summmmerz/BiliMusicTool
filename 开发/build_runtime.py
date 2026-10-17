@@ -142,11 +142,22 @@ def verify(out_dir: Path) -> None:
             + (r.stderr or "")[-600:])
     log(r.stdout.rstrip())
 
-    log("  [自检 3] yt-dlp 可执行文件是否随 pip 一起装上")
-    yt = out_dir / "Scripts" / "yt-dlp.exe"
-    log(f"    {yt}  存在={yt.is_file()}")
-    if not yt.is_file():
-        log("    [警告] Scripts\\yt-dlp.exe 不存在，下载时会回退到 python -m yt_dlp")
+    log("  [自检 3] yt_dlp 模块可用性（程序实际走 python -m yt_dlp）")
+    r = subprocess.run([str(py), "-m", "yt_dlp", "--version"],
+                       capture_output=True, text=True, encoding="utf-8",
+                       errors="replace", timeout=60)
+    log(f"    python -m yt_dlp --version -> rc={r.returncode} "
+        f"{(r.stdout or r.stderr).strip()[:60]!r}")
+    if r.returncode != 0:
+        raise SystemExit("  !! python -m yt_dlp 不可用，请检查 requirements 安装")
+
+    # Scripts\*.exe 是 pip 生成的 stub，内部硬编码了本机的解释器绝对路径，
+    # 换机器必坏（退出码1、无输出）。打包时会被删掉，这里只提示、不视为错误。
+    stubs = sorted(p.name for p in (out_dir / "Scripts").glob("*.exe")) \
+        if (out_dir / "Scripts").is_dir() else []
+    if stubs:
+        log(f"    注：Scripts 下有 {len(stubs)} 个 pip stub，打包时会被剔除"
+            f"（它们硬编码了本机路径）")
 
     size = sum(f.stat().st_size for f in out_dir.rglob("*") if f.is_file())
     log(f"  运行时体积: {size / 1048576:.1f} MB")
